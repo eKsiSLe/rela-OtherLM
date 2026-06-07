@@ -112,6 +112,10 @@ public sealed class ExampleOtherLmConnectorDevice : ILMDevice
         return true;
     }
 
+    // Sample helper only.
+    // rēlā connectors publish data by raising ILMDevice events.
+    // This method demonstrates a real payload shape by emitting
+    // live (`OnBallData`) + final (`OnShot` + `OnShotEnded`) events.
     public void EmitExampleShot()
     {
         var shot = new DeviceShotData
