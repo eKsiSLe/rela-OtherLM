@@ -1,4 +1,4 @@
-# rēlā Other Launch Monitor Connector API
+# rēlā - Other Launch Monitor Connector API
 
 This folder is prepared to become the external GitHub repository for `Other` launch monitor connectors for `rēlā`.
 
