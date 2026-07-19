@@ -1,184 +1,175 @@
 # rēlā - Other Launch Monitor Connector API
 
-This folder is prepared to become the external GitHub repository for `Other` launch monitor connectors for `rēlā`.
+This repository documents and demonstrates the external `Other` launch monitor connector API for `rēlā`.
 
-It documents the connector surface used by `rēlā` and ships a minimal template plugin project so contributors can create and publish their own connector DLLs.
+It documents the contract already implemented in the application and ships a minimal template plugin project so contributors can create and publish connector DLLs.
 
-## What this repository contains
+## What the repo is for
 
-- A stable description of the `Other` connector contract.
-- A sample implementation that demonstrates the required `ILMDevice` surface.
-- Guidance for building, wiring, and validating connectors without reading host internals.
+- Provide a stable source-of-truth for the `Other` plugin surface.
+- Show how `rēlā` discovers and runs third-party launch monitor connectors.
+- Offer a minimal starter plugin so people can begin integration without needing to reverse engineer the host project.
 
-## Architecture in `rēlā` (high level)
+## Current architecture in `rēlā`
 
-`rēlā` discovers external LM plugins from the application directory.
+`rēlā` already loads external plugins from the application directory using Autofac discovery:
 
-1. `PluginFinder` loads each local `.dll` and resolves public concrete `ILMDevice` implementations.
-2. For `Other`, `PluginFinder` selects the first `ILMDevice` that is not a clearly in-process built-in family.
-3. `DeviceSessionCoordinator` owns plugin lifecycle calls:
-   - `Init()` when the device profile is selected.
-   - `Discover()` when user clicks Discover/Search.
+1. User selects `Other` in settings (which is intentionally routed through the same external backend).
+2. `PluginFinder` scans each local `.dll`, loads assemblies, and registers all public non-abstract types implementing `ILMDevice`.
+3. For `Other`, `PluginFinder` picks the first registered `ILMDevice` that is not clearly a built-in family.
+4. `DeviceSessionCoordinator` calls:
+   - `Init()` when the device instance is selected.
+   - `Discover()` when the user clicks Discover/Search.
    - `Connect()` when a direct connect is requested.
-4. The UI subscribes to plugin events and drives transport/state from those events.
+5. The UI consumes shot and state events and passes shot data into telemetry and simulator transport.
 
-## Connector lifecycle contract
+## Contract to implement
 
-The host does not need any special bootstrap from plugins beyond this interface.
+Connector implementations must implement `ILMDevice` from the `relaDevicePlugin` API package/assembly.
 
-1. Implement `ILMDevice` from the `relaDevicePlugin` API.
-2. Keep methods idempotent:
-   - `Discover()` and `Connect()` should safely return `true` when called more than once.
-3. Use status events to communicate state transitions.
-4. Emit shot/raw events only after transport and calibration/setup are active.
-5. On shutdown, `Disconnect()` should stop activity and clear readiness state.
-
-## ILMDevice contract
+## Interface surface
 
 `ILMDevice` requires:
 
-- `bool SetRightHanded()`
-- `bool SetLeftHanded()`
-- `bool Connect()`
-- `bool Reconnect()`
-- `bool Disconnect()`
-- `bool SetPuttingMode()`
-- `bool SetChippingMode()`
-- `bool SetNormalMode()`
-- `void Init()`
-- `string GetDeviceName()`
-- `bool Discover()`
-- `bool ResetReady()`
-- `event Action<DeviceShotData> OnBallData`
-- `event Action<DeviceShotData> OnShot`
-- `event Action<DeviceShotData> OnShotEnded`
-- `event Action<DeviceRawShot> OnRawShot`
-- `event Action<string> OnNotification`
-- `event Action<string> OnHandedChange`
-- `event Action<string> OnModeChange`
-- `event Action<string> OnError`
-- `event Action<string> OnNote`
+- Events:
+  - `Action<DeviceShotData> OnBallData`
+  - `Action<DeviceShotData> OnShot`
+  - `Action<DeviceShotData> OnShotEnded`
+  - `Action<DeviceRawShot> OnRawShot`
+  - `Action<string> OnNotification`
+  - `Action<string> OnHandedChange`
+  - `Action<string> OnModeChange`
+  - `Action<string> OnError`
+  - `Action<string> OnNote`
+- Methods:
+  - `bool SetRightHanded()`
+  - `bool SetLeftHanded()`
+  - `bool Connect()`
+  - `bool Reconnect()`
+  - `bool Disconnect()`
+  - `bool SetPuttingMode()`
+  - `bool SetChippingMode()`
+  - `bool SetNormalMode()`
+  - `void Init()`
+  - `string GetDeviceName()`
+  - `bool Discover()`
+  - `bool ResetReady()`
 
-### Event meanings
-
-- `OnBallData`: live/incremental updates while a shot is building.
-- `OnShotEnded`: finalized shot that `rēlā` treats as terminal shot for processing.
-- `OnShot`: compatibility alias for final shot; emit the same payload as `OnShotEnded`.
-- `OnRawShot`: optional raw payload for optional logging and diagnostics.
-- `OnNotification`: status text updates (human-readable).
-- `OnHandedChange`: emit `"RH"` or `"LH"` whenever handedness changes.
-- `OnModeChange`: emit normalized mode values (`NORMAL`, `PUTTING`, `CHIPPING`).
-- `OnError`: non-fatal and recoverable errors only.
-- `OnNote`: optional detailed notes/status stream.
-
-### Optional `Other` state extension points
-
-For `Other`, `rēlā` reads these optional members by reflection:
+For `Other`, the app looks for these optional properties by reflection and falls back to defaults when absent:
 
 - `bool OtherIsReady`
 - `bool OtherBallPresent`
 
-They are not part of `ILMDevice`, but `rēlā` uses them when available.
+These are not part of `ILMDevice` today, but `rēlā` reads them as extension points. Set them as soon as state is known:
 
-- `OtherIsReady` affects UI ready/connected indicator and discovery flow.
-- `OtherBallPresent` affects UI ball-detection state.
+- `OtherIsReady` controls the ready indicator.
+- `OtherBallPresent` controls the ball detected indicator and readiness gating behavior.
 
-Set these fields as soon as the underlying transport changes state.
+### Optional device settings
 
-## Shot payload contract (important)
-
-`rēlā` does not provide a method like `SendShot()` on the connector API.
-The only data path is event emission.
-
-### Required behavior
-
-1. Emit one or more `OnBallData` frames as the shot evolves.
-2. Emit one final frame using:
-   - `OnShot(finalShot)`
-   - `OnShotEnded(finalShot)`
-3. Optionally emit raw telemetry with `OnRawShot`.
-
-### Minimal reliable fields
-
-- `IsShotValid` must be accurate for each event.
-- At minimum, provide:
-  - `Speed`
-  - `CarryDistance` (if known)
-- Recommended fields when available:
-  - `HLA`
-  - `VLA`
-  - `BackSpin`
-  - `SideSpin`
-  - `TotalSpin`
-  - `ClubSpeed`
-  - `Notes`
-
-When a field is unknown, leave it `null` rather than manufacturing values.
-
-### Recommended code shape (pseudo)
+Connectors that expose their own settings UI can additionally implement `IDeviceSettingsProvider`:
 
 ```csharp
-// Example in your parser/device callback path.
-void OnTrackingFrame(TrackerFrame frame)
+public interface IDeviceSettingsProvider
 {
-    var shot = new DeviceShotData
-    {
-        IsShotValid = frame.Valid,
-        Speed = frame.SpeedMph,
-        HLA = frame.Hla,
-        VLA = frame.Vla,
-        CarryDistance = frame.CarryYards
-    };
-
-    OnBallData(shot); // optional interim updates
-}
-
-void OnTrackingFinalFrame(TrackerFrame frame)
-{
-    var shot = MapFrameToDeviceShotData(frame);
-    OnShot(shot);       // compatibility alias
-    OnShotEnded(shot);  // primary final-shot event
+    void ShowDeviceSettings();
 }
 ```
 
-The sample file still includes `EmitExampleShot()` to demonstrate event shape, but connectors should wire this method to real hardware callbacks instead of a manual test trigger.
+When `Other` is selected and the active connector implements this interface, rēlā shows a **Device Settings** button in the Settings window. Clicking it calls `ShowDeviceSettings()` on the active connector.
+
+The connector owns the complete settings experience: UI, validation, persistence, and applying changes to a live device. The host does not inspect or render connector setting fields. `ShowDeviceSettings()` must marshal to the appropriate UI thread when needed and should report failures through the normal plugin events rather than throwing into the host.
+
+The example connector implements this complete path. Its plugin-owned dialog edits handedness and mode, persists them to `Settings/Other/example-other-connector.json`, and publishes `OnHandedChange` and `OnModeChange` after a successful save. See `ExampleOtherLmConnectorDevice.ShowDeviceSettings()` and `ExampleOtherLmConnectorSettingsDialog`.
+
+## Shot calls and payload expectations
+
+`rēlā` consumes `DeviceShotData` and optionally `DeviceRawShot`.
+
+`rēlā` receives shot information through callback-style events; there are four calls that matter to plugin authors.
+
+1. `OnBallData(DeviceShotData shot)`
+   - Use this for **in-flight** telemetry and pre-impact updates.
+   - `rēlā` treats these as `ShotPhase.BallData` and may use them for streaming telemetry/ready-state logic.
+   - This can be called 0..N times per shot window.
+
+2. `OnShot(DeviceShotData shot)`
+   - This event is part of the API surface for compatibility with older integrations.
+   - In current `rēlā` flow it is not wired to transport, so emit it only if you need a dedicated separator event for tooling.
+   - The preferred final-shot path for `rēlā` is `OnShotEnded`.
+
+3. `OnShotEnded(DeviceShotData shot)`
+   - This is the primary final-shot event for `rēlā`.
+   - When emitted, `rēlā` marks the payload as `ShotPhase.ShotEnded` and routes it through normal shot dispatch.
+   - Emit this once per shot once all metrics are ready and values are final.
+
+4. `OnRawShot(DeviceRawShot rawShot)`
+   - Optional telemetry path for raw payload logging.
+   - `rēlā` only persists/logs this when raw-shot logging is enabled in settings.
+
+Per-shot payload guidance:
+- Set `IsShotValid` accurately. Invalid shots are still accepted for telemetry, but dispatch behavior can be filtered by plugin/device policy.
+- Fill core ball metrics when available: `Speed`, `HLA`, `VLA`, `BackSpin`, `SideSpin`, `SpinAxis`, `TotalSpin`, and `CarryDistance`.
+- Keep `Speed`/spin/angles in the same unit system you intend to model consistently; `rēlā` applies the same interpretation consistently across plugins.
+- Optional `Notes` entries are accepted and can be used for diagnostics.
+- Include optional club metrics (`ClubSpeed`, angles, impact fields, confidence fields) when available so downstream inference/quality logic can use them.
 
 ## Template project
 
-Starter plugin files are located in:
+A starter plugin with the full event/method surface is under:
 
 - `src/ExampleOtherLmConnector/ExampleOtherLmConnectorDevice.cs`
 - `src/ExampleOtherLmConnector/ExampleOtherLmConnectorModule.cs`
+- `src/ExampleOtherLmConnector/ExampleOtherLmConnectorSettings.cs`
+- `src/ExampleOtherLmConnector/ExampleOtherLmConnectorSettingsDialog.cs`
 - `src/ExampleOtherLmConnector/ExampleOtherLmConnector.csproj`
 
-### Build
+### Build (standalone repo mode)
+
+Provide a local API DLL path when building outside the monorepo:
 
 ```bash
-dotnet build src/ExampleOtherLmConnector/ExampleOtherLmConnector.csproj
+dotnet build src/ExampleOtherLmConnector/ExampleOtherLmConnector.csproj \
+  /p:relaDevicePluginReferencePath="/absolute/path/to/relaDevicePlugin.dll"
 ```
 
-## Deployment
+### Build (rēlā monorepo mode)
+
+When this folder is inside the rēlā workspace, the example project falls back to the monorepo API project reference:
+
+```bash
+dotnet build rela-otherLM-connector/src/ExampleOtherLmConnector/ExampleOtherLmConnector.csproj
+```
+
+## Deploy
 
 1. Build the connector assembly.
 2. Copy the output DLL next to `rela.exe`.
-3. Open `rēlā`, select `Other` as Device Type.
-4. Click Discover, then Connect.
-5. Verify output in logs (`OnNotification`, `OnError`, shot events).
+3. Open `rēlā` and set Device Type to `Other`.
+4. Click Discover and then Connect.
+5. Use logs to confirm `OnNotification` messages and status updates.
 
-## Recommended implementation style
+## Repository conventions
 
 - Keep dependencies small.
-- Keep transport and state management inside the plugin assembly.
-- Preserve connector stability:
-  - avoid throwing exceptions from interface methods,
-  - return `false` on failure paths.
-- Emit `OnModeChange` and `OnHandedChange` whenever mode/handedness changes.
-- Use consistent naming in `GetDeviceName()` for a clear UI identity.
+- Keep plugin state and networking inside the plugin assembly.
+- Emit status strings on `OnNotification` and non-fatal detail on `OnError`.
+- Use `Other` + optional state properties above for richer UI behavior.
+- Prefer stable device names in `GetDeviceName()` so users can identify the plugin quickly.
+
+## Recommended minimum behavior
+
+- Implement `Discover()` and `Connect()` idempotently.
+- Return `true` once your plugin has started or scheduled async startup work.
+- Set `OtherIsReady` to `true` once the transport/hardware is connected.
+- Clear ready/ball state on `Disconnect()` and `Reconnect()`.
+- Emit `OnModeChange(...)` and `OnHandedChange(...)` whenever mode/handedness changes so `rēlā` UI stays in sync.
+- Avoid throwing out of interface methods; return `false` on failure.
 
 ## Open-source onboarding checklist
 
-- [ ] Create your own GitHub repo with this folder as the root.
-- [ ] Add your connector under `src/YourConnectorName/`.
-- [ ] Reference the `relaDevicePlugin` API source or a maintained package feed.
+- [ ] Create a repo with this folder as the root.
+- [ ] Add your connector in `src/YourConnectorName/`.
+- [ ] Update package references to your local/packaged `relaDevicePlugin` API.
 - [ ] Add a connector-specific README and license.
-- [ ] Tag a release that includes a DLL artifact.
+- [ ] Tag a release with a DLL artifact for users.

@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.Windows;
 using relaDevicePlugin;
 
 namespace ExampleOtherLmConnector;
 
-public sealed class ExampleOtherLmConnectorDevice : ILMDevice
+public sealed class ExampleOtherLmConnectorDevice : ILMDevice, IDeviceSettingsProvider
 {
+    private ExampleOtherLmConnectorSettings _settings = new();
     private string _mode = "NORMAL";
     private string _handed = "RH";
 
@@ -24,12 +26,52 @@ public sealed class ExampleOtherLmConnectorDevice : ILMDevice
 
     public void Init()
     {
+        try
+        {
+            _settings = ExampleOtherLmConnectorSettings.Load();
+            _mode = _settings.Mode;
+            _handed = _settings.Handedness;
+        }
+        catch (Exception ex)
+        {
+            OnError.Invoke("[Other Template] Settings load failed: " + ex.Message);
+        }
+
         OtherIsReady = false;
         OtherBallPresent = false;
         OnNotification.Invoke("[Other Template] Initialized.");
     }
 
     public string GetDeviceName() => "Example Other Connector";
+
+    public void ShowDeviceSettings()
+    {
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher != null && !dispatcher.CheckAccess())
+        {
+            dispatcher.Invoke(ShowDeviceSettings);
+            return;
+        }
+
+        try
+        {
+            var candidate = _settings.Copy();
+            if (!ExampleOtherLmConnectorSettingsDialog.TryCollect(candidate))
+                return;
+
+            candidate.Save();
+            _settings = candidate;
+            _mode = candidate.Mode;
+            _handed = candidate.Handedness;
+            OnModeChange.Invoke(_mode);
+            OnHandedChange.Invoke(_handed);
+            OnNotification.Invoke("[Other Template] Device settings saved.");
+        }
+        catch (Exception ex)
+        {
+            OnError.Invoke("[Other Template] Settings failed: " + ex.Message);
+        }
+    }
 
     public bool Discover()
     {
@@ -71,6 +113,7 @@ public sealed class ExampleOtherLmConnectorDevice : ILMDevice
     public bool SetRightHanded()
     {
         _handed = "RH";
+        SaveCurrentSettings();
         OnHandedChange.Invoke("RH");
         return true;
     }
@@ -78,6 +121,7 @@ public sealed class ExampleOtherLmConnectorDevice : ILMDevice
     public bool SetLeftHanded()
     {
         _handed = "LH";
+        SaveCurrentSettings();
         OnHandedChange.Invoke("LH");
         return true;
     }
@@ -85,6 +129,7 @@ public sealed class ExampleOtherLmConnectorDevice : ILMDevice
     public bool SetPuttingMode()
     {
         _mode = "PUTTING";
+        SaveCurrentSettings();
         OnModeChange.Invoke(_mode);
         return true;
     }
@@ -92,6 +137,7 @@ public sealed class ExampleOtherLmConnectorDevice : ILMDevice
     public bool SetChippingMode()
     {
         _mode = "CHIPPING";
+        SaveCurrentSettings();
         OnModeChange.Invoke(_mode);
         return true;
     }
@@ -99,6 +145,7 @@ public sealed class ExampleOtherLmConnectorDevice : ILMDevice
     public bool SetNormalMode()
     {
         _mode = "NORMAL";
+        SaveCurrentSettings();
         OnModeChange.Invoke(_mode);
         return true;
     }
@@ -112,10 +159,6 @@ public sealed class ExampleOtherLmConnectorDevice : ILMDevice
         return true;
     }
 
-    // Sample helper only.
-    // rēlā connectors publish data by raising ILMDevice events.
-    // This method demonstrates a real payload shape by emitting
-    // live (`OnBallData`) + final (`OnShot` + `OnShotEnded`) events.
     public void EmitExampleShot()
     {
         var shot = new DeviceShotData
@@ -145,5 +188,19 @@ public sealed class ExampleOtherLmConnectorDevice : ILMDevice
         });
 
         OnNotification("[Other Template] Example shot emitted.");
+    }
+
+    private void SaveCurrentSettings()
+    {
+        try
+        {
+            _settings.Mode = _mode;
+            _settings.Handedness = _handed;
+            _settings.Save();
+        }
+        catch (Exception ex)
+        {
+            OnError.Invoke("[Other Template] Settings save failed: " + ex.Message);
+        }
     }
 }

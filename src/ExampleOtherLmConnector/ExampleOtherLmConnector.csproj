@@ -3,6 +3,7 @@
     <AssemblyName>ExampleOtherLmConnector</AssemblyName>
     <RootNamespace>ExampleOtherLmConnector</RootNamespace>
     <TargetFramework>net6.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
@@ -12,7 +13,14 @@
     <PackageReference Include="Autofac" Version="6.3.0" />
   </ItemGroup>
 
-  <ItemGroup>
+  <ItemGroup Condition="'$(relaDevicePluginReferencePath)' == ''">
     <ProjectReference Include="..\..\..\src\relaDevicePlugin\relaDevicePlugin.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(relaDevicePluginReferencePath)' != ''">
+    <Reference Include="relaDevicePlugin">
+      <HintPath>$(relaDevicePluginReferencePath)</HintPath>
+      <Private>false</Private>
+    </Reference>
   </ItemGroup>
 </Project>
