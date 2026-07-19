@@ -12,7 +12,7 @@ It documents the contract already implemented in the application and ships a min
 
 ## Current architecture in `rēlā`
 
-`rēlā` already loads external plugins from the application directory using Autofac discovery:
+`rēlā` already loads external plugins from the application directory using type discovery:
 
 1. User selects `Other` in settings (which is intentionally routed through the same external backend).
 2. `PluginFinder` scans each local `.dll`, loads assemblies, and registers all public non-abstract types implementing `ILMDevice`.
@@ -25,7 +25,7 @@ It documents the contract already implemented in the application and ships a min
 
 ## Contract to implement
 
-Connector implementations must implement `ILMDevice` from the `relaDevicePlugin` API package/assembly.
+Connector implementations must implement `ILMDevice` from the `rela.OtherDevice.Abstractions` NuGet package. The package contains compile-time metadata only; rēlā supplies the matching runtime assembly from its embedded application bundle.
 
 ## Interface surface
 
@@ -119,32 +119,22 @@ Per-shot payload guidance:
 A starter plugin with the full event/method surface is under:
 
 - `src/ExampleOtherLmConnector/ExampleOtherLmConnectorDevice.cs`
-- `src/ExampleOtherLmConnector/ExampleOtherLmConnectorModule.cs`
 - `src/ExampleOtherLmConnector/ExampleOtherLmConnectorSettings.cs`
 - `src/ExampleOtherLmConnector/ExampleOtherLmConnectorSettingsDialog.cs`
 - `src/ExampleOtherLmConnector/ExampleOtherLmConnector.csproj`
 
-### Build (standalone repo mode)
+### Build
 
-Provide a local API DLL path when building outside the monorepo:
-
-```bash
-dotnet build src/ExampleOtherLmConnector/ExampleOtherLmConnector.csproj \
-  /p:relaDevicePluginReferencePath="/absolute/path/to/relaDevicePlugin.dll"
-```
-
-### Build (rēlā monorepo mode)
-
-When this folder is inside the rēlā workspace, the example project falls back to the monorepo API project reference:
+Restore and build the example normally. The API contract is restored from NuGet.org:
 
 ```bash
-dotnet build rela-otherLM-connector/src/ExampleOtherLmConnector/ExampleOtherLmConnector.csproj
+dotnet build src/ExampleOtherLmConnector/ExampleOtherLmConnector.csproj
 ```
 
 ## Deploy
 
 1. Build the connector assembly.
-2. Copy the output DLL next to `rela.exe`.
+2. Copy only the connector DLL next to `rela.exe`. Do not deploy files from `rela.OtherDevice.Abstractions`; rēlā supplies that contract at runtime.
 3. Open `rēlā` and set Device Type to `Other`.
 4. Click Discover and then Connect.
 5. Use logs to confirm `OnNotification` messages and status updates.
@@ -170,6 +160,6 @@ dotnet build rela-otherLM-connector/src/ExampleOtherLmConnector/ExampleOtherLmCo
 
 - [ ] Create a repo with this folder as the root.
 - [ ] Add your connector in `src/YourConnectorName/`.
-- [ ] Update package references to your local/packaged `relaDevicePlugin` API.
+- [ ] Reference a `rela.OtherDevice.Abstractions` package version supported by the target rēlā release.
 - [ ] Add a connector-specific README and license.
 - [ ] Tag a release with a DLL artifact for users.
