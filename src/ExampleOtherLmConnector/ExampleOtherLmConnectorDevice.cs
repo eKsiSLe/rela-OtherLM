@@ -10,9 +10,15 @@ public sealed class ExampleOtherLmConnectorDevice : ILMDevice, IDeviceSettingsPr
     private ExampleOtherLmConnectorSettings _settings = new();
     private string _mode = "NORMAL";
     private string _handed = "RH";
+    private bool _connected;
 
+    public bool SessionConnected => _connected;
     public bool OtherIsReady { get; private set; }
     public bool OtherBallPresent { get; private set; }
+    public bool OtherIsArmed { get; private set; }
+    // This example emits one final payload through OnShotEnded in every mode.
+    public bool UsesTelemetryFinalShotPath => true;
+    public string SupportedConnectionTypes => "Direct";
 
     public event Action<DeviceShotData> OnBallData = delegate { };
     public event Action<DeviceShotData> OnShotEnded = delegate { };
@@ -39,6 +45,8 @@ public sealed class ExampleOtherLmConnectorDevice : ILMDevice, IDeviceSettingsPr
 
         OtherIsReady = false;
         OtherBallPresent = false;
+        OtherIsArmed = false;
+        _connected = false;
         OnNotification.Invoke("[Other Template] Initialized.");
     }
 
@@ -83,8 +91,11 @@ public sealed class ExampleOtherLmConnectorDevice : ILMDevice, IDeviceSettingsPr
     {
         try
         {
+            _connected = true;
             OtherIsReady = true;
-            OnNotification.Invoke("[Other Template] Connected.");
+            OtherIsArmed = true;
+            OnNote.Invoke("[Other] BallStatus: ready=true ball=false");
+            OnNotification.Invoke("[Other] Connected: Example Other Connector.");
             OnModeChange.Invoke(_mode);
             OnHandedChange.Invoke(_handed);
             return true;
@@ -104,9 +115,12 @@ public sealed class ExampleOtherLmConnectorDevice : ILMDevice, IDeviceSettingsPr
 
     public bool Disconnect()
     {
+        _connected = false;
         OtherIsReady = false;
         OtherBallPresent = false;
-        OnNotification.Invoke("[Other Template] Disconnected.");
+        OtherIsArmed = false;
+        OnNote.Invoke("[Other] BallStatus: ready=false ball=false");
+        OnNotification.Invoke("[Other] Disconnected: Example Other Connector.");
         return true;
     }
 
@@ -155,9 +169,13 @@ public sealed class ExampleOtherLmConnectorDevice : ILMDevice, IDeviceSettingsPr
         // Clear ball present state, then mark ready so UI can be re-armed.
         OtherBallPresent = false;
         OtherIsReady = true;
+        OtherIsArmed = true;
+        OnNote.Invoke("[Other] BallStatus: ready=true ball=false");
         OnNotification("[Other Template] Ready reset.");
         return true;
     }
+
+    public bool ArmOnly() => ResetReady();
 
     public void EmitExampleShot()
     {
@@ -175,7 +193,6 @@ public sealed class ExampleOtherLmConnectorDevice : ILMDevice, IDeviceSettingsPr
             Notes = new List<string> { "example shot" }
         };
 
-        OnBallData(shot);
         OnShot(shot);
         OnShotEnded(shot);
 

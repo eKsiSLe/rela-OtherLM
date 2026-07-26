@@ -23,6 +23,8 @@ It documents the contract already implemented in the application and ships a min
    - `Connect()` when a direct connect is requested.
 5. The UI consumes shot and state events and passes shot data into telemetry and simulator transport.
 
+The Search action does **not** call `Connect()` after `Discover()` returns. If a connector expects Search to produce a live session, its `Discover()` implementation must continue through connection itself (commonly `return Connect();`) or start the complete asynchronous discover/connect workflow before returning.
+
 ## Contract to implement
 
 Connector implementations must implement `ILMDevice` from the `rela.OtherDevice.Abstractions` NuGet package. The package contains compile-time metadata only; rēlā supplies the matching runtime assembly from its embedded application bundle.
@@ -59,11 +61,38 @@ For `Other`, the app looks for these optional properties by reflection and falls
 
 - `bool OtherIsReady`
 - `bool OtherBallPresent`
+- `bool OtherIsArmed`
+- `bool SessionConnected`
+- `bool UsesTelemetryFinalShotPath`
+- `long LastStatusUtcTicks`
+- `string SupportedConnectionTypes`
 
 These are not part of `ILMDevice` today, but `rēlā` reads them as extension points. Set them as soon as state is known:
 
 - `OtherIsReady` controls the ready indicator.
 - `OtherBallPresent` controls the ball detected indicator and readiness gating behavior.
+- `OtherIsArmed` distinguishes an armed session from a ball-ready state.
+- `SessionConnected` lets the host detect a transport that ended without relying only on text notifications.
+- `UsesTelemetryFinalShotPath` should be `true` only when the connector emits one authoritative final measurement through `OnShotEnded` in every mode. This prevents the legacy non-normal-mode pipeline from expecting a separate `OnBallData` packet for putting or chipping. When the property is absent or `false`, the existing mode-dependent event behavior is unchanged.
+- `LastStatusUtcTicks` participates in the generic 25-second activity watchdog. Only expose it if the connector refreshes it on transport activity; keepalive intervals must remain below that timeout.
+- `SupportedConnectionTypes` is a comma-separated capability list such as `Network`, `USB,Network`, or `Bluetooth`.
+
+The host also recognizes optional public methods by reflection:
+
+- `bool ArmOnly()` for the Arm UI and AXIS force-arm command.
+- `bool SetClub(string club)` for simulator club synchronization.
+
+These extension members are backward compatible because they are discovered by name at runtime rather than added to `ILMDevice`. Existing connectors that do not expose them retain the previous defaults.
+
+### Connection and state notification contract
+
+Connection transitions are currently recognized from exact generic prefixes:
+
+- Successful connection: `[Other] Connected: ...`
+- Disconnection or failed search: `[Other] Disconnected: ...`
+- Immediate ready/ball refresh: `[Other] BallStatus: ready=true ball=false`
+
+Connector-specific informational prefixes are fine for ordinary notes, but they do not replace these generic lifecycle messages. Emit the connected notification only after the transport handshake is complete.
 
 ### Optional device settings
 
@@ -81,6 +110,8 @@ When `Other` is selected and the active connector implements this interface, rē
 The connector owns the complete settings experience: UI, validation, persistence, and applying changes to a live device. The host does not inspect or render connector setting fields. `ShowDeviceSettings()` must marshal to the appropriate UI thread when needed and should report failures through the normal plugin events rather than throwing into the host.
 
 The example connector implements this complete path. Its plugin-owned dialog edits handedness and mode, persists them to `Settings/Other/example-other-connector.json`, and publishes `OnHandedChange` and `OnModeChange` after a successful save. See `ExampleOtherLmConnectorDevice.ShowDeviceSettings()` and `ExampleOtherLmConnectorSettingsDialog`.
+
+The example also demonstrates the final-only event model: it exposes `UsesTelemetryFinalShotPath = true` and emits each completed measurement once through `OnShotEnded`.
 
 ## Shot calls and payload expectations
 
@@ -136,7 +167,7 @@ dotnet build src/ExampleOtherLmConnector/ExampleOtherLmConnector.csproj
 1. Build the connector assembly.
 2. Copy only the connector DLL next to `rela.exe`. Do not deploy files from `rela.OtherDevice.Abstractions`; rēlā supplies that contract at runtime.
 3. Open `rēlā` and set Device Type to `Other`.
-4. Click Discover and then Connect.
+4. Click Search. The connector's `Discover()` implementation must perform or start the full discover/connect workflow.
 5. Use logs to confirm `OnNotification` messages and status updates.
 
 ## Repository conventions
@@ -150,10 +181,14 @@ dotnet build src/ExampleOtherLmConnector/ExampleOtherLmConnector.csproj
 ## Recommended minimum behavior
 
 - Implement `Discover()` and `Connect()` idempotently.
+- Make `Discover()` establish or start the live session because Search does not automatically call `Connect()` afterward.
 - Return `true` once your plugin has started or scheduled async startup work.
-- Set `OtherIsReady` to `true` once the transport/hardware is connected.
+- Set `SessionConnected`/`OtherIsArmed` when the transport is live, and set `OtherIsReady` according to the device's actual ready-to-hit state.
 - Clear ready/ball state on `Disconnect()` and `Reconnect()`.
+- Use the generic `[Other] Connected:`, `[Other] Disconnected:`, and `[Other] BallStatus:` lifecycle prefixes.
 - Emit `OnModeChange(...)` and `OnHandedChange(...)` whenever mode/handedness changes so `rēlā` UI stays in sync.
+- For a final-only connector, expose `UsesTelemetryFinalShotPath = true` and emit each measurement once through `OnShotEnded`; do not duplicate the same payload through `OnBallData`, which is reserved for optional in-flight updates.
+- If the device itself identifies a final measurement as a putt, include the note `OTHER_PUTT_LIKE=1`. This preserves true-putt handling even if simulator club selection has not yet changed to `PT`.
 - Avoid throwing out of interface methods; return `false` on failure.
 
 ## Open-source onboarding checklist
