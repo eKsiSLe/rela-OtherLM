@@ -10,7 +10,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="rela.OtherDevice.Abstractions" Version="1.0.0">
+    <PackageReference Include="rela.OtherDevice.Abstractions" Version="1.1.0">
       <IncludeAssets>compile</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
