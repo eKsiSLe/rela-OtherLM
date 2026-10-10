@@ -5,8 +5,21 @@ using relaDevicePlugin;
 
 namespace ExampleOtherLmConnector;
 
-public sealed class ExampleOtherLmConnectorDevice : ILMDevice, IDeviceSettingsProvider
+public sealed class ExampleOtherLmConnectorDevice : ILMDevice, IDeviceSettingsProvider, IDeviceReplaySource
 {
+    // Optional capability. The host owns the viewer; call this from a capture
+    // worker only after files are complete. Never wait for media in shot callbacks.
+    public bool ReplayCaptureEnabled { get; set; } = true;
+    public event Action<DeviceReplayCapture> ReplayAvailable = delegate { };
+
+    public void PublishCompletedCapture(DeviceReplayCapture capture)
+    {
+        if (!ReplayCaptureEnabled) return;
+        foreach (Action<DeviceReplayCapture> subscriber in ReplayAvailable.GetInvocationList())
+            try { subscriber(capture); }
+            catch (Exception ex) { OnNote("Replay subscriber failed: " + ex.Message); }
+    }
+
     private ExampleOtherLmConnectorSettings _settings = new();
     private string _mode = "NORMAL";
     private string _handed = "RH";

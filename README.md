@@ -198,3 +198,38 @@ dotnet build src/ExampleOtherLmConnector/ExampleOtherLmConnector.csproj
 - [ ] Reference a `rela.OtherDevice.Abstractions` package version supported by the target rēlā release.
 - [ ] Add a connector-specific README and license.
 - [ ] Tag a release with a DLL artifact for users.
+
+## Optional impact replay (SDK 1.1.0)
+
+Implement `IDeviceReplaySource` alongside `ILMDevice` to feed rēlā's themed,
+resizable replay window. Existing connectors remain valid without this interface.
+Replay-enabled plugins require a host containing SDK 1.1.0; do not install them
+into older rēlā builds. Do not distribute `relaDevicePlugin.dll` beside the plugin.
+
+- `event Action<DeviceReplayCapture> ReplayAvailable`: publish completed captures
+  from a worker, independently of shot callbacks, readiness and simulator delivery.
+- `bool ReplayCaptureEnabled { get; set; }`: honor the host's capture preference.
+- `DeviceReplayCapture`: provider-scoped `ShotId`, `DeviceName`, `CapturedUtc`,
+  `Association` and `Tracks`. Set `DeviceShotData.ReplayShotId` to the same shot ID.
+- `DeviceReplayTrack`: `Id`, `Label`, optional absolute local `VideoPath`, optional
+  actual `CaptureFramesPerSecond`, and `Frames`. If both video and frames are
+  supplied, the viewer uses frames. Codec support depends on Windows media support.
+- `DeviceReplayFrame`: `Index`, absolute local `ImagePath`, `Width`, `Height`,
+  optional `TimestampMicroseconds`, and `RotationDegrees` (0, 90, 180 or 270).
+
+Use one track per camera/view; keep bursts in original frame order. Never invent
+capture FPS or interpolate missing camera frames. Native stills remain stills.
+Publish immutable snapshots after writing files; preserve files for review, with
+bounded provider-owned retention. The host copies metadata, loads images lazily,
+accepts up to 8 tracks / 200 frames per track and 20 MiB per image, and bounds UI
+backlog/history. Disconnect/switch drops late captures; it does not delete files.
+
+Open **Settings → Shot Replay**. Capture defaults on; auto-show defaults off.
+Users can pop out the window, choose shots/views, step/scrub frames, play/loop,
+zoom, follow the newest shot, and optionally show new captures without focus theft.
+Host preferences live in `%LOCALAPPDATA%/rela/Settings/Replay.json`.
+
+The repository includes the reference-only SDK 1.1.0 package in `packages/`.
+`NuGet.config` resolves it locally alongside nuget.org; no runtime implementation
+or vendor SDK is included. The sample's `PublishCompletedCapture` demonstrates
+publication only: replace it with your device's asynchronous capture worker.
